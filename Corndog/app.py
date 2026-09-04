@@ -5,13 +5,38 @@ INTENTIONALLY VULNERABLE test fixture for Checkmarx One SAST scanner validation.
 Do NOT deploy this. Do NOT expose it to a network. For scan-testing purposes only.
 
 Contains:
-  1. Command Injection - ping_host()
+  1. SQL Injection  - build_user_query() / get_user()
+  2. Command Injection - ping_host()
 
-Takes unsanitized input and passes it straight into a sink (os.system) so
-SAST should flag it as a tainted data flow.
+Both take unsanitized input and pass it straight into a sink (SQL string
+concatenation, os.system) so SAST should flag them as tainted data flows.
 """
 
+import sqlite3
 import os
+import sys
+
+
+def setup_db():
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, email TEXT)")
+    cur.execute("INSERT INTO users (username, email) VALUES ('alice', 'alice@example.com')")
+    cur.execute("INSERT INTO users (username, email) VALUES ('bob', 'bob@example.com')")
+    conn.commit()
+    return conn
+
+
+def get_user(conn, username):
+    """
+    VULNERABLE: SQL Injection (CWE-89)
+    User-controlled 'username' is concatenated directly into the SQL string
+    instead of using a parameterized query (e.g. cur.execute(query, (username,))).
+    """
+    cur = conn.cursor()
+    query = "SELECT id, username, email FROM users WHERE username = '" + username + "'"
+    cur.execute(query)
+    return cur.fetchall()
 
 
 def ping_host(host):
@@ -26,7 +51,14 @@ def ping_host(host):
 
 
 def main():
-    print("=== Command Injection test ===")
+    conn = setup_db()
+
+    print("=== SQL Injection test ===")
+    username = input("Enter a username to look up: ")
+    results = get_user(conn, username)
+    print("Results:", results)
+
+    print("\n=== Command Injection test ===")
     host = input("Enter a host to ping: ")
     ping_host(host)
 
